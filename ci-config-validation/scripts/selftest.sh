@@ -3,7 +3,7 @@
 # validation — a validator nobody tests is a validator that silently stops
 # working.
 set -uo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 
 # Always clean up the injected template, even if validate.sh dies mid-run.
 trap 'rm -f templates/haproxy/__selftest.cfg.template' EXIT

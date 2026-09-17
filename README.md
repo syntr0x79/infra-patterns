@@ -1,5 +1,7 @@
 # infra-patterns
 
+[![tests](https://github.com/syntr0x79/infra-patterns/actions/workflows/tests.yml/badge.svg)](https://github.com/syntr0x79/infra-patterns/actions/workflows/tests.yml)
+
 Infrastructure patterns from running self-hosted production systems — bare metal, Kubernetes across two datacenters, Patroni, CI that refuses to ship a broken config.
 
 Each directory is a working implementation plus a README that explains the decision behind it, including the trade-offs and the cases where the pattern is the wrong choice. Everything here was rewritten from scratch as a generic, runnable version; none of it is a client's code or configuration.

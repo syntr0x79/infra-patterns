@@ -1,0 +1,100 @@
+name: tests
+
+# Every pattern that claims to be verifiable is verified here on each push.
+# Jobs are split per pattern so a failure names the thing that broke rather
+# than "tests".
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  config-validation:
+    name: ci-config-validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pull checker images
+        run: |
+          docker pull haproxy:2.9-alpine
+          docker pull nginx:1.27-alpine
+
+      - name: Validate templates
+        working-directory: ci-config-validation
+        run: ./scripts/validate.sh
+
+      - name: Self-test — broken templates must be rejected
+        working-directory: ci-config-validation
+        run: ./scripts/selftest.sh
+
+  zone-watchdog:
+    name: k8s-cross-dc-zone-affinity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # kubectl and curl are stubbed, so no cluster and no network are needed.
+      - name: Run watchdog decision tests
+        working-directory: k8s-cross-dc-zone-affinity
+        run: ./tests/run.sh
+
+      - name: Check the script is POSIX sh
+        working-directory: k8s-cross-dc-zone-affinity
+        run: sh -n watchdog.sh
+
+  command-policy:
+    name: agent-command-safety
+    runs-on: ubuntu-latest
+    strategy:
+      # The policy is a boundary; it has to behave identically on every
+      # interpreter someone might embed it in.
+      matrix:
+        python: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install
+        working-directory: agent-command-safety
+        run: pip install -e ".[dev]"
+
+      - name: Test
+        working-directory: agent-command-safety
+        run: pytest -q
+
+  ingress-template:
+    name: ingress-without-metallb
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - run: pip install jinja2 pyyaml
+
+      - run: docker pull haproxy:2.9-alpine
+
+      - name: Render the template and check it with haproxy -c
+        working-directory: ingress-without-metallb
+        run: ./validate.sh
+
+  shell-lint:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: shellcheck every script
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          # SC1091: sourced files are resolved at runtime, not in CI.
+          find . -name '*.sh' -not -path './.git/*' -print0 \
+            | xargs -0 shellcheck --severity=warning --exclude=SC1091

@@ -7,7 +7,7 @@
 # then asserts on the decision, not on the plumbing.
 set -uo pipefail
 
-cd "$(dirname "$0")"
+cd "$(dirname "$0")" || exit 1
 ROOT="$(cd .. && pwd)"
 STUBS="$PWD/stubs"
 export PATH="$STUBS:$PATH"
