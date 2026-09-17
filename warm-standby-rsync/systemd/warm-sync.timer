@@ -1,0 +1,12 @@
+[Unit]
+Description=Hourly warm standby sync
+
+[Timer]
+OnCalendar=hourly
+# Spread the load if several primaries share a standby, and avoid syncing at
+# exactly :00 alongside every other cron on the fleet.
+RandomizedDelaySec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

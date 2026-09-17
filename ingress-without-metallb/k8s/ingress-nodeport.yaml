@@ -1,0 +1,53 @@
+# Publish the ingress controller on a fixed NodePort on every node.
+#
+# No LoadBalancer service type, no MetalLB, no layer 2 anywhere: an external
+# HAProxy health-checks the NodePort on each worker and sends traffic to the
+# ones that answer. Failover is HAProxy noticing a check fail, which takes
+# `inter * fall` — two seconds with the values below — and needs no ARP,
+# no gratuitous announcement and no convergence on the overlay.
+apiVersion: v1
+kind: Service
+metadata:
+  name: ingress-nginx-controller
+  namespace: ingress
+spec:
+  type: NodePort
+  # Pinned, not allocated: the edge configuration references these numbers,
+  # and a port that moves on redeploy is an outage nobody attributes to the
+  # right change.
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      nodePort: 32080
+    - name: https
+      port: 443
+      targetPort: https
+      nodePort: 32443
+  selector:
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/component: controller
+---
+# Cluster is the right choice here even though it costs an extra hop.
+#
+# externalTrafficPolicy: Local preserves the client IP but makes a node with no
+# controller pod fail its health check — which is fine — and makes traffic to a
+# node that *has* a pod bypass kube-proxy's load balancing, concentrating load
+# on however many nodes happen to run the controller. With Cluster, every node
+# is a valid entry point, and the client IP is recovered from the
+# X-Forwarded-For that HAProxy sets, which is where it should come from when
+# there is a real proxy in front.
+#
+# The trade only works because HAProxy is trusted to set the header. If it
+# were not, Local plus a DaemonSet controller would be the better shape.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ingress-nginx-controller
+  namespace: ingress
+data:
+  use-forwarded-headers: "true"
+  # Only trust the header from the edge; anything else is a client lying
+  # about its own address.
+  proxy-real-ip-cidr: "203.0.113.10/32"
+  compute-full-forwarded-for: "true"

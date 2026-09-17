@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Test stub. Serves fixture files and records calls; never touches a cluster.
+echo "kubectl $*" >> "$CALLS"
+
+args="$*"
+
+case "$args" in
+  *"get pods -n prod -l app=queue"*)
+    cat "$FIXTURE/anchor-pod-name" 2>/dev/null || true ;;
+  *"get pod -n prod"*"jsonpath={.spec.nodeName}"*)
+    cat "$FIXTURE/anchor-node" ;;
+  *"get node"*"-o json"*)
+    node=$(echo "$args" | awk '{for(i=1;i<=NF;i++) if($i=="node") print $(i+1)}')
+    cat "$FIXTURE/node-$node.json" ;;
+  *"get configmap"*)
+    cat "$FIXTURE/last-switchover" 2>/dev/null || exit 1 ;;
+  *"get deployment api -n prod -o json"*)
+    cat "$FIXTURE/deployment-api.json" ;;
+  *"get pods -n prod -l app=api"*)
+    cat "$FIXTURE/api-pod-nodes" ;;
+  *"rollout restart"*) echo "deployment.apps/api restarted" ;;
+  *"create configmap"*) cat <<'YAML'
+apiVersion: v1
+kind: ConfigMap
+YAML
+    ;;
+  *"apply -f"*) echo "configmap/zone-watchdog-state configured" ;;
+  *) echo "STUB: unhandled kubectl call: $args" >&2; exit 1 ;;
+esac

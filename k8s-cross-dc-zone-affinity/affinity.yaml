@@ -1,0 +1,97 @@
+# Pinning latency-sensitive workloads to one anchor.
+#
+# The anchor is an arbitrary choice made once: pick a workload that already
+# has to be singular, and make everything that must stay close to the
+# database follow it. Then one watchdog keeps the database leader in the
+# anchor's zone, and everything else is correct by construction.
+#
+# Why an anchor rather than pinning each deployment to a zone by name: a hard
+# zone name in a manifest is a decision that has to be changed in N places on
+# failover, by hand, under pressure. An anchor moves once and the rest follow.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: queue
+  namespace: prod
+  labels: {app: queue}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: queue}
+  template:
+    metadata:
+      labels: {app: queue}
+    spec:
+      containers:
+        - name: queue
+          image: rabbitmq:3.13-management
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: prod
+spec:
+  replicas: 4
+  selector:
+    matchLabels: {app: api}
+  template:
+    metadata:
+      labels: {app: api}
+    spec:
+      affinity:
+        podAffinity:
+          # required, not preferred: "preferred" degrades silently into the
+          # exact cross-site latency this whole pattern exists to prevent,
+          # and nothing tells you it happened.
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels: {app: queue}
+              topologyKey: topology.kubernetes.io/zone
+        # Spread across nodes inside the zone: co-located with the anchor,
+        # but not all on one machine.
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels: {app: api}
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: api
+          image: registry.example.com/app/api:latest
+---
+# The pooler sits on the hot path to PostgreSQL, so it follows the anchor too.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pgbouncer
+  namespace: prod
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: pgbouncer}
+  template:
+    metadata:
+      labels: {app: pgbouncer}
+    spec:
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels: {app: queue}
+              topologyKey: topology.kubernetes.io/zone
+      containers:
+        - name: pgbouncer
+          image: edoburu/pgbouncer:1.22
+---
+# Nodes must carry the zone label the watchdog reads. kubespray and most
+# installers do not set it on bare metal — label them yourself, once:
+#
+#   kubectl label node worker-1 topology.kubernetes.io/zone=site-a
+#   kubectl label node worker-9 topology.kubernetes.io/zone=site-b
+#
+# Getting this wrong is silent: an unlabelled node makes the watchdog exit
+# early rather than guess, which is the safe direction but looks like the
+# watchdog is doing nothing.

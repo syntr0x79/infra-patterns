@@ -1,0 +1,108 @@
+{#
+  Edge load balancer in front of a Kubernetes cluster with no LoadBalancer
+  service type.
+
+  Port 80 routes by Host header, port 443 routes by TLS SNI without
+  terminating — the certificate stays in the cluster, where cert-manager
+  already renews it. Terminating here would mean shipping certificates to the
+  edge and building a second renewal path for no benefit.
+#}
+global
+    log stdout format raw local0 info
+    maxconn 20000
+    tune.ssl.default-dh-param 2048
+
+defaults
+    log     global
+    option  dontlognull
+    timeout connect 5s
+    timeout client  60s
+    timeout server  60s
+{# websockets outlive the ordinary client timeout #}
+    timeout tunnel  1h
+    default-server inter 1s fall 2 rise 2
+
+#--------------------------------------------------------------------- :80
+frontend http_in
+    bind *:80
+    mode http
+    option httplog
+    option forwardfor
+
+{% for site in ingress_sites %}
+    acl host_{{ site.name }} hdr_end(host) -i {{ site.domain }}
+    use_backend k8s_http_{{ site.name }} if host_{{ site.name }}
+{% endfor %}
+    default_backend k8s_http
+
+#-------------------------------------------------------------------- :443
+{# TCP mode: SNI is read from the handshake and the connection is passed
+   through untouched. `tcp-request inspect-delay` is what makes req_ssl_sni
+   available — without it the ACL evaluates before the ClientHello arrives
+   and every request lands on the default backend. #}
+frontend https_in
+    bind *:443
+    mode tcp
+    option tcplog
+    tcp-request inspect-delay 5s
+    tcp-request content accept if { req_ssl_hello_type 1 }
+
+{% for site in ingress_sites %}
+    acl sni_{{ site.name }} req_ssl_sni -i -m end {{ site.domain }}
+    use_backend k8s_https_{{ site.name }} if sni_{{ site.name }}
+{% endfor %}
+    default_backend k8s_https
+
+#----------------------------------------------------------------- backends
+{# Health checks hit the ingress controller's own /healthz on the HTTP
+   NodePort. Checking the TCP port alone would keep sending traffic to a node
+   whose controller is up but unhealthy. #}
+backend k8s_http
+    mode http
+    balance roundrobin
+    option httpchk GET /healthz
+    http-check expect status 200
+{% for ip in k8s_workers %}
+    server worker-{{ loop.index }} {{ ip }}:{{ ingress_http_nodeport }} check
+{% endfor %}
+
+backend k8s_https
+    mode tcp
+    balance roundrobin
+    option httpchk GET /healthz
+    http-check expect status 200
+{% for ip in k8s_workers %}
+    server worker-{{ loop.index }} {{ ip }}:{{ ingress_https_nodeport }} check port {{ ingress_http_nodeport }}
+{% endfor %}
+
+{# Per-site backends exist for the case where one domain must be served by a
+   subset of workers — a different cluster, a zone-pinned workload, a canary.
+   When site.workers is unset it falls back to all of them. #}
+{% for site in ingress_sites %}
+backend k8s_http_{{ site.name }}
+    mode http
+    balance roundrobin
+    option httpchk GET /healthz
+    http-check expect status 200
+{% for ip in site.workers | default(k8s_workers) %}
+    server {{ site.name }}-{{ loop.index }} {{ ip }}:{{ site.http_nodeport | default(ingress_http_nodeport) }} check
+{% endfor %}
+
+backend k8s_https_{{ site.name }}
+    mode tcp
+    balance roundrobin
+    option httpchk GET /healthz
+    http-check expect status 200
+{% for ip in site.workers | default(k8s_workers) %}
+    server {{ site.name }}-{{ loop.index }} {{ ip }}:{{ site.https_nodeport | default(ingress_https_nodeport) }} check port {{ site.http_nodeport | default(ingress_http_nodeport) }}
+{% endfor %}
+{% endfor %}
+
+#------------------------------------------------------------------- stats
+listen stats
+    bind 127.0.0.1:8404
+    mode http
+    stats enable
+    stats uri /
+    stats refresh 5s
+

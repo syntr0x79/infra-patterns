@@ -1,0 +1,76 @@
+# .gitignore for an infrastructure repository.
+#
+# Every rule says why it exists. A list of bare patterns is a list nobody can
+# safely edit: the next person cannot tell which lines are load-bearing and
+# which were cargo-culted, so they either leave dead rules forever or delete a
+# live one. Rules that explain themselves get maintained.
+#
+# Copy this to .gitignore and keep the comments.
+
+# ---------------------------------------------------------------- plaintext
+# The working set of secrets. Encrypted as secrets.tar.enc (see
+# secrets-crypt.sh); the ciphertext is committed, these are not.
+.env
+*.env.local
+secrets/
+
+# Private keys and certificates, wherever they land.
+*.pem
+*.key
+!*.pub
+
+# ------------------------------------------------------------------ tooling
+# Terraform state contains resolved secret values and provider credentials —
+# it is as sensitive as the secrets themselves and belongs in a remote
+# encrypted backend, never in git.
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+terraform.tfvars
+*.auto.tfvars
+# Templates stay tracked; they are the documentation of what must be filled in.
+!*.tfvars.example
+
+# Kubeconfigs embed client certificates or long-lived tokens.
+kubeconfig
+*.kubeconfig
+admin.conf
+
+# Service account JSON keys.
+sa-key*.json
+
+# --------------------------------------------------- generated per-deployment
+# Files below are produced by a bootstrap step and differ per deployment.
+# Committing one deployment's copy overwrites everyone else's on the next
+# pull — and because the file still looks plausible, the breakage surfaces
+# later, somewhere else, as a configuration that "was working yesterday".
+#
+# This is not hypothetical: a stale placeholder file was once committed over a
+# real one, and the failure showed up two environments away.
+#
+# Track the .example template instead. Anything a bootstrap generates from
+# live state belongs here.
+configs/generated/
+**/bootstrap-*.json
+**/containers.json
+
+# ------------------------------------------------------- migration workspace
+# Intermediate files from moving secrets into a secret manager: plaintext
+# dumps of production values, rekey working files, one-shot credentials on
+# their way into a CI settings page. All of them are short-lived and none of
+# them should be one `git add -A` away from the history.
+payloads/
+**/payloads/
+*-recon.json
+.ci-vault-secrets.json
+
+# ------------------------------------------------------------------- local
+# Developer-local context and editor state; no secrets, just noise.
+.DS_Store
+.idea/
+.vscode/
+*.swp
+__pycache__/
+*.pyc
+.venv/

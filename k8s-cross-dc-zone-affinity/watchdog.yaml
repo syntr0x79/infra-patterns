@@ -1,0 +1,141 @@
+# Zone watchdog: RBAC, configuration, schedule.
+#
+# The script itself lives in watchdog.sh and is loaded into the ConfigMap
+# below. Generate this file after editing the script:
+#
+#   kubectl create configmap zone-watchdog-script \
+#     --from-file=watchdog.sh=watchdog.sh \
+#     --dry-run=client -o yaml
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: zone-watchdog
+  namespace: prod
+---
+# Deliberately narrow. The watchdog reads pods, nodes and deployments, and the
+# only thing it may change is a deployment's rollout and its own state
+# ConfigMap. It cannot delete anything, cannot read secrets, and cannot patch
+# arbitrary resources — a bug in the script has a small blast radius by
+# construction rather than by good intentions.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: zone-watchdog
+rules:
+  - apiGroups: [""]
+    resources: [pods, nodes]
+    verbs: [get, list]
+  - apiGroups: ["apps"]
+    resources: [deployments]
+    verbs: [get, list, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: zone-watchdog
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: zone-watchdog
+subjects:
+  - kind: ServiceAccount
+    name: zone-watchdog
+    namespace: prod
+---
+# State lives in a namespaced ConfigMap, so the cooldown survives pod restarts
+# without needing a database or an annotation on something else.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: zone-watchdog-state
+  namespace: prod
+rules:
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [get, create, update, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: zone-watchdog-state
+  namespace: prod
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: zone-watchdog-state
+subjects:
+  - kind: ServiceAccount
+    name: zone-watchdog
+    namespace: prod
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: zone-watchdog-config
+  namespace: prod
+data:
+  NAMESPACE: prod
+  # The workload whose location defines "where the database should be".
+  # Pick the one everything else is already pinned to — see affinity.yaml.
+  ANCHOR_LABEL: app=queue
+  PATRONI_MEMBERS: db-1=http://10.0.0.200:8008,db-2=http://10.0.0.201:8008
+  MEMBER_ZONES: db-1=site-a,db-2=site-b
+  PINNED_DEPLOYMENTS: prod/api,prod/worker,prod/pgbouncer
+  ZONE_LABEL: topology.kubernetes.io/zone
+  MAX_LAG_BYTES: "10485760"
+  COOLDOWN_SECONDS: "1800"
+  DRY_RUN: "false"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: zone-watchdog
+  namespace: prod
+spec:
+  # Two minutes: long enough that a rolling restart of the anchor does not
+  # trigger a switchover, short enough that a real move is corrected before
+  # anyone opens a latency ticket.
+  schedule: "*/2 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  startingDeadlineSeconds: 60
+  jobTemplate:
+    spec:
+      backoffLimit: 0        # a failed run is retried by the next tick
+      ttlSecondsAfterFinished: 3600
+      template:
+        spec:
+          serviceAccountName: zone-watchdog
+          restartPolicy: Never
+          # The watchdog must be able to run when a whole site is down, so it
+          # must not be pinned to one.
+          tolerations:
+            - key: node-role.kubernetes.io/control-plane
+              operator: Exists
+              effect: NoSchedule
+          containers:
+            - name: watchdog
+              image: alpine/k8s:1.29.12   # kubectl + curl + jq
+              command: [sh, /script/watchdog.sh]
+              envFrom:
+                - configMapRef:
+                    name: zone-watchdog-config
+              volumeMounts:
+                - name: script
+                  mountPath: /script
+              resources:
+                requests: {cpu: 10m, memory: 32Mi}
+                limits:   {memory: 64Mi}
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 65534
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: {drop: [ALL]}
+          volumes:
+            - name: script
+              configMap:
+                name: zone-watchdog-script
+                defaultMode: 0555

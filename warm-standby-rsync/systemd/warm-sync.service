@@ -1,0 +1,16 @@
+[Unit]
+Description=Push application state to the warm standby
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/warm-sync.env
+ExecStart=/usr/local/bin/warm-sync.sh
+
+# A sync that hangs must not block the next one indefinitely; the lock in the
+# script handles overlap, this handles a wedged ssh.
+TimeoutStartSec=50min
+
+Nice=10
+IOSchedulingClass=idle

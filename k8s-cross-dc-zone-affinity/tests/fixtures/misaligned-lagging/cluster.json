@@ -1,0 +1,2 @@
+{"members":[{"name":"db-1","role":"leader","state":"running"},
+            {"name":"db-2","role":"replica","state":"streaming","lag":524288000}]}

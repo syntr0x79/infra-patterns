@@ -1,0 +1,31 @@
+name: validate-config
+
+# Configuration templates are validated on every change, before anything is
+# deployed. A typo in a template used to be found in production; now it is
+# found here.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pull the checker images up front. On a runner with no internet access,
+      # replace this with a registry login — the images are expected to be
+      # cached there already, and no job step installs packages.
+      - name: Pull checker images
+        run: |
+          docker pull haproxy:2.9-alpine
+          docker pull nginx:1.27-alpine
+
+      - name: Validate templates
+        run: ./scripts/validate.sh
+
+      # Proves the validator still rejects what it is supposed to reject.
+      - name: Self-test the validator
+        run: ./scripts/selftest.sh

@@ -1,0 +1,13 @@
+# Missing from vars.env on purpose: ${MISSING_BACKEND_IP} is never defined,
+# so envsubst leaves it literal. haproxy -c accepts this file happily —
+# "${MISSING_BACKEND_IP}" parses as a hostname. It fails at runtime instead,
+# which is the whole reason the unsubstituted-variable check exists.
+defaults
+    mode tcp
+    timeout connect 5s
+    timeout client 30s
+    timeout server 30s
+
+listen broken
+    bind *:5432
+    server db1 ${MISSING_BACKEND_IP}:5432 check

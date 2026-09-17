@@ -1,0 +1,43 @@
+global
+    log stdout format raw local0 info
+    maxconn 4096
+
+defaults
+    log     global
+    mode    tcp
+    option  tcplog
+    timeout connect 5s
+    timeout client  30m
+    timeout server  30m
+
+# PostgreSQL behind Patroni: the leader is whichever node answers 200 on
+# /primary. Health-checking the REST API instead of the port is what makes a
+# failover invisible to clients.
+listen postgres-primary
+    bind *:5432
+    option httpchk GET /primary
+    http-check expect status 200
+    default-server inter 3s fall 3 rise 2 on-marked-down shutdown-sessions
+    server db1 ${DB_NODE1_IP}:5432 check port 8008
+    server db2 ${DB_NODE2_IP}:5432 check port 8008
+
+listen postgres-replicas
+    bind *:5433
+    balance roundrobin
+    option httpchk GET /replica
+    http-check expect status 200
+    default-server inter 3s fall 3 rise 2
+    server db1 ${DB_NODE1_IP}:5432 check port 8008
+    server db2 ${DB_NODE2_IP}:5432 check port 8008
+
+listen redis-primary
+    bind *:6379
+    option tcp-check
+    tcp-check send AUTH\ ${CACHE_PASSWORD}\r\n
+    tcp-check expect string +OK
+    tcp-check send info\ replication\r\n
+    tcp-check expect string role:master
+    tcp-check send QUIT\r\n
+    tcp-check expect string +OK
+    server cache1 ${CACHE_NODE1_IP}:6379 check inter 3s fall 3 rise 2
+    server cache2 ${CACHE_NODE2_IP}:6379 check inter 3s fall 3 rise 2

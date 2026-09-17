@@ -1,0 +1,16 @@
+# /home/standby/.ssh/authorized_keys on the STANDBY.
+#
+# The key can do exactly one thing: rsync into /opt, write-only. It cannot get
+# a shell, cannot read anything back out, cannot forward ports.
+#
+#   -wo   write-only: the primary may push, but this key cannot pull data out
+#   /opt  the only path it may touch
+#
+# rrsync ships with rsync (often at /usr/share/rsync/scripts/rrsync or
+# /usr/bin/rrsync). Without it, a "restricted" key is just a shell.
+
+command="/usr/bin/rrsync -wo /opt",restrict ssh-ed25519 AAAA... warm-sync@primary
+
+# A second key for the one diagnostic the primary needs — checking that the
+# standby is alive — kept separate so the sync key stays single-purpose.
+command="/usr/bin/df -h /opt",restrict ssh-ed25519 AAAA... warm-check@primary

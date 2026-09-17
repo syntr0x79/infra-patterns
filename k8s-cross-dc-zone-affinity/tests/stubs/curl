@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Test stub for the Patroni REST API.
+echo "curl $*" >> "$CALLS"
+for a in "$@"; do
+  case "$a" in
+    *"/cluster") cat "$FIXTURE/cluster.json"; exit 0 ;;
+    *"/switchover") [ -f "$FIXTURE/switchover-fails" ] && exit 22; echo "Successfully switched over"; exit 0 ;;
+  esac
+done
+exit 1

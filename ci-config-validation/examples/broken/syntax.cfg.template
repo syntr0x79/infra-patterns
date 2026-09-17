@@ -1,0 +1,12 @@
+# Valid substitution, invalid HAProxy: "balance roundrobbin" is a typo that
+# only haproxy -c can catch.
+defaults
+    mode tcp
+    timeout connect 5s
+    timeout client 30s
+    timeout server 30s
+
+listen broken
+    bind *:5432
+    balance roundrobbin
+    server db1 ${DB_NODE1_IP}:5432 check

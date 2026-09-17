@@ -1,0 +1,58 @@
+proxmox_endpoint  = "https://hypervisor-1.example.com:8006/"
+proxmox_api_token = "terraform@pve!tf=00000000-0000-0000-0000-000000000000"
+template_vm_id    = 9000
+ssh_public_key    = "ssh-ed25519 AAAA... ops@example.com"
+network_gateway   = "10.0.0.1"
+inventory_path    = "../ansible/inventory/hosts.yml"
+
+nodes = {
+  "k8s-manager-1" = {
+    hypervisor = "hypervisor-1"
+    address    = "10.0.0.10"
+    cores      = 4
+    memory     = 8192
+    disk_gb    = 60
+    groups     = ["k8s", "kube_control_plane", "etcd"]
+    zone       = "site-a"
+  }
+
+  "k8s-worker-1" = {
+    hypervisor = "hypervisor-1"
+    address    = "10.0.0.100"
+    cores      = 8
+    memory     = 32768
+    disk_gb    = 200
+    groups     = ["k8s", "kube_node"]
+    zone       = "site-a"
+  }
+
+  "k8s-worker-9" = {
+    hypervisor = "hypervisor-2"
+    address    = "10.0.0.108"
+    cores      = 8
+    memory     = 32768
+    disk_gb    = 200
+    groups     = ["k8s", "kube_node"]
+    zone       = "site-b"
+  }
+
+  "db-1" = {
+    hypervisor = "hypervisor-1"
+    address    = "10.0.0.200"
+    cores      = 8
+    memory     = 32768
+    disk_gb    = 500
+    groups     = ["postgres", "patroni"]
+    zone       = "site-a"
+  }
+
+  "db-2" = {
+    hypervisor = "hypervisor-2"
+    address    = "10.0.0.201"
+    cores      = 8
+    memory     = 32768
+    disk_gb    = 500
+    groups     = ["postgres", "patroni"]
+    zone       = "site-b"
+  }
+}

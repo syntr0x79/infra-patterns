@@ -1,0 +1,26 @@
+# Values for haproxy.cfg.j2 — an Ansible host_vars file, or anything that can
+# render Jinja2.
+
+ingress_http_nodeport: 32080
+ingress_https_nodeport: 32443
+
+# Every worker that can accept ingress traffic. Adding a node here is the only
+# step needed to put it into rotation; HAProxy health checks decide the rest.
+k8s_workers:
+  - 10.0.0.100
+  - 10.0.0.101
+  - 10.0.0.102
+  - 10.0.0.103
+
+ingress_sites:
+  # Routed by Host on :80 and SNI on :443, served by all workers.
+  - name: app
+    domain: app.example.com
+
+  # Same edge, different cluster: a domain can be pointed at a separate set of
+  # workers without a second load balancer or a second public address.
+  - name: staging
+    domain: staging.example.com
+    workers:
+      - 10.1.0.100
+      - 10.1.0.101
