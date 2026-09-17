@@ -24,5 +24,9 @@ t = jinja2.Template(pathlib.Path("haproxy/haproxy.cfg.j2").read_text(),
 out.write_text(t.render(**v))
 PY
 
-docker run --rm -v "$rendered:/tmp/h.cfg:ro" haproxy:2.9-alpine haproxy -c -f /tmp/h.cfg
+# Fed through stdin rather than bind-mounted. The haproxy image runs as a
+# non-root user, and a file from mktemp is mode 0600 owned by whoever ran the
+# script — so a mount fails with "Permission denied" on Linux while working
+# fine on Docker Desktop, which rewrites ownership. stdin has no owner.
+docker run --rm -i haproxy:2.9-alpine haproxy -c -f /dev/stdin < "$rendered"
 echo "haproxy.cfg.j2 renders to a valid configuration"

@@ -75,14 +75,22 @@ validate_haproxy() {
     set -a; . ./templates/haproxy/vars.env; set +a
     envsubst "$(subst_list ./templates/haproxy/vars.env)" < "$t" > "$rendered"
 
+    # Piped in rather than bind-mounted: the haproxy image runs as a non-root
+    # user and mktemp produces a 0600 file owned by the caller, so a mount
+    # fails with "Permission denied" on Linux while passing on Docker Desktop,
+    # which rewrites ownership. stdin sidesteps ownership entirely.
     if check_unsubstituted "$rendered" "$t"; then
-      if docker run --rm -v "$rendered:/tmp/haproxy.cfg:ro" \
-           "$HAPROXY_IMAGE" haproxy -c -f /tmp/haproxy.cfg >/dev/null 2>&1; then
+      if docker run --rm -i "$HAPROXY_IMAGE" haproxy -c -f /dev/stdin \
+           < "$rendered" >/dev/null 2>&1; then
         ok "$t"
       else
         local out
-        out=$(docker run --rm -v "$rendered:/tmp/haproxy.cfg:ro" \
-              "$HAPROXY_IMAGE" haproxy -c -f /tmp/haproxy.cfg 2>&1 | tail -3 | tr '\n' ' ')
+        # `|| true` matters: under `set -e` with pipefail a failing command
+        # substitution aborts the script here, so the validator would exit 1
+        # without ever printing which template broke or why — which is most of
+        # its value.
+        out=$(docker run --rm -i "$HAPROXY_IMAGE" haproxy -c -f /dev/stdin \
+              < "$rendered" 2>&1 | tail -3 | tr '\n' ' ' || true)
         err "$t" "haproxy -c: ${out}"
       fi
     fi
@@ -104,6 +112,11 @@ validate_nginx() {
   openssl req -x509 -newkey rsa:2048 -nodes -keyout "$workdir/key.pem" \
     -out "$workdir/cert.pem" -days 1 -subj "/CN=ci.invalid" >/dev/null 2>&1
 
+  # nginx -t needs these on disk because of the include, and the container may
+  # not run as root. mktemp -d is 0700 and its files 0600, which the container
+  # user cannot read on Linux.
+  chmod 755 "$workdir"
+
   for t in templates/nginx/*.conf.template; do
     found=1
     set -a; . ./templates/nginx/vars.env; set +a
@@ -118,6 +131,7 @@ http {
     include /etc/ci/site.conf;
 }
 CONF
+      chmod 644 "$workdir"/*.pem "$workdir/site.conf" "$workdir/nginx.conf"
       if docker run --rm \
            -v "$workdir/nginx.conf:/etc/nginx/nginx.conf:ro" \
            -v "$workdir:/etc/ci:ro" \
@@ -128,7 +142,7 @@ CONF
         out=$(docker run --rm \
               -v "$workdir/nginx.conf:/etc/nginx/nginx.conf:ro" \
               -v "$workdir:/etc/ci:ro" \
-              "$NGINX_IMAGE" nginx -t 2>&1 | tail -3 | tr '\n' ' ')
+              "$NGINX_IMAGE" nginx -t 2>&1 | tail -3 | tr '\n' ' ' || true)
         err "$t" "nginx -t: ${out}"
       fi
     fi
